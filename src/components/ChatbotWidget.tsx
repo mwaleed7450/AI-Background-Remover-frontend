@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import DOMPurify from 'dompurify'
-import type { Message, ChatResponse, ImageAnalysis, CaptionStyle } from '../types'
+import type { Message, ChatResponse, ImageAnalysis, CaptionStyle, ConversationSummary } from '../types'
 import { chatService } from '../services/chatService'
 import { favoriteService } from '../services/favoriteService'
 import { imageService } from '../services/imageService'
@@ -9,7 +9,7 @@ import { useLocation } from 'react-router-dom'
 
 // ─── Mode Types ───────────────────────────────────────────────────────────────
 
-type Mode = 'chat' | 'analysis' | 'suggestions' | 'captions'
+type Mode = 'chat' | 'analysis' | 'suggestions' | 'captions' | 'history'
 
 type Position = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
 
@@ -473,6 +473,9 @@ const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({
   const [messages, setMessages] = useState<Message[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [conversationList, setConversationList] = useState<ConversationSummary[]>([])
+  const [conversationListLoading, setConversationListLoading] = useState(false)
+  const [conversationListLoaded, setConversationListLoaded] = useState(false)
   const location = useLocation()
   const currentPath = location.pathname
 
@@ -534,6 +537,7 @@ const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({
   useEffect(() => {
     if (isOpen && mode === 'chat') setTimeout(() => chatInputRef.current?.focus(), 150)
     if (isOpen) setUnread(0)
+    if (isOpen && mode === 'history' && !conversationListLoaded) loadConversationList()
   }, [isOpen, mode])
 
   // Fetch persisted conversation once, the first time the widget is opened.
@@ -619,6 +623,32 @@ const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({
     setConversationId(null)
     setChatError(null)
     setPendingChatMessage(null)
+  }
+
+  const loadConversationList = async () => {
+    if (conversationListLoading) return
+    setConversationListLoading(true)
+    try {
+      const res = await chatService.listConversations()
+      setConversationList(res.conversations)
+      setConversationListLoaded(true)
+    } catch { /* best-effort */ }
+    finally { setConversationListLoading(false) }
+  }
+
+  const handleSelectConversation = async (convId: string) => {
+    try {
+      const res = await chatService.getHistory(convId)
+      setConversationId(res.conversation_id)
+      const restored: Message[] = res.messages.map((m, i) => ({
+        id: `restored-${i}-${Date.now()}`,
+        role: m.role,
+        content: m.content,
+        timestamp: Date.now(),
+      }))
+      setMessages(restored)
+      setMode('chat')
+    } catch { /* best-effort */ }
   }
 
   const handleChatKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -753,6 +783,7 @@ const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({
     { id: 'analysis', label: 'Analyze', color: 'emerald', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
     { id: 'suggestions', label: 'Suggest', color: 'amber', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg> },
     { id: 'captions', label: 'Caption', color: 'violet', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" /></svg> },
+    { id: 'history', label: 'History', color: 'sky', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
   ]
 
   const charCount = chatInput.length
@@ -760,6 +791,44 @@ const ChatbotWidget: React.FC<ChatbotWidgetProps> = ({
   const charColor = charPct >= 1 ? 'text-danger' : charPct >= 0.9 ? 'text-amber-500' : 'text-muted'
 
   const renderModeContent = () => {
+    if (mode === 'history') {
+      return (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-none">
+            {conversationListLoading && (
+              <p className="text-[11px] text-muted text-center py-8">Loading conversations…</p>
+            )}
+            {!conversationListLoading && conversationList.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center text-center py-8">
+                <p className="text-xs font-bold text-primary">No past conversations</p>
+                <p className="text-[10px] text-secondary mt-1">Your chat history will appear here.</p>
+              </div>
+            )}
+            {!conversationListLoading && conversationList.map(conv => (
+              <button
+                key={conv.conversation_id}
+                onClick={() => handleSelectConversation(conv.conversation_id)}
+                className={`w-full text-left rounded-xl border p-3 transition-all ${
+                  conv.conversation_id === conversationId
+                    ? 'border-magenta/40 bg-magenta/5'
+                    : 'border-border bg-surface hover:border-magenta/30 hover:bg-surface-raised'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[10px] font-semibold text-primary">
+                    {conv.message_count} message{conv.message_count !== 1 ? 's' : ''}
+                  </span>
+                  <span className="text-[9px] text-muted">
+                    {conv.updated_at ? new Date(conv.updated_at).toLocaleDateString() : ''}
+                  </span>
+                </div>
+                <p className="text-[11px] text-secondary line-clamp-2">{conv.preview}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )
+    }
     if (mode === 'chat') {
       return (
         <div className="flex flex-col flex-1 overflow-hidden">

@@ -144,3 +144,14 @@ export interface BatchAdvancedAnalysisItem {
 export interface BatchAdvancedAnalysisResponse {
   results: BatchAdvancedAnalysisItem[]
 }
+
+export interface ConversationSummary {
+  conversation_id: string
+  preview: string
+  message_count: number
+  updated_at: string
+}
+
+export interface ConversationListResponse {
+  conversations: ConversationSummary[]
+}

@@ -1,5 +1,5 @@
 import apiClient from './apiClient'
-import type { ChatResponse, ChatHistoryResponse, ChatHistoryMessage } from '../types'
+import type { ChatResponse, ChatHistoryResponse, ChatHistoryMessage, ConversationListResponse } from '../types'
 
 export const chatService = {
   async sendMessage(
@@ -31,6 +31,11 @@ export const chatService = {
     })
     return data
   },
+  async listConversations(): Promise<ConversationListResponse> {
+    const { data } = await apiClient.get<ConversationListResponse>('/api/chat/conversations')
+    return data
+  },
+
   async clearHistory(conversationId?: string | null): Promise<void> {
     await apiClient.delete('/api/chat/history', {
       params: conversationId ? { conversation_id: conversationId } : undefined,
